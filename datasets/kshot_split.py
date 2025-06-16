@@ -1,5 +1,6 @@
 import json
 import random
+import argparse
 
 def filter_k_shot_json(input_file, output_file, k_shot):
     # Read the COCO FORMAT JSON data
@@ -32,14 +33,15 @@ def filter_k_shot_json(input_file, output_file, k_shot):
     # For each category, randomly select k images and ensure 1 annotation per image
     for category_id, image_annotations in category_to_image_annotations.items():
         image_ids = list(image_annotations.keys())
-        
-        if len(image_ids) <= k_shot:
-            selected_image_ids.update(image_ids)
-            selected_annotations.extend(image_annotations[image_id] for image_id in image_ids)
+
+        if len(image_ids) >= k_shot:
+            chosen_ids = random.sample(image_ids, k_shot)
         else:
-            selected_image_ids_k = random.sample(image_ids, k_shot)
-            selected_image_ids.update(selected_image_ids_k)
-            selected_annotations.extend(image_annotations[image_id] for image_id in selected_image_ids_k)
+            # not enough images, sample with replacement
+            chosen_ids = image_ids + random.choices(image_ids, k=k_shot - len(image_ids))
+
+        selected_image_ids.update(chosen_ids)
+        selected_annotations.extend(image_annotations[img_id] for img_id in chosen_ids)
     
     # Filter the images based on the selected image IDs
     selected_images = [image_id_to_image[image_id] for image_id in selected_image_ids]
@@ -57,5 +59,11 @@ def filter_k_shot_json(input_file, output_file, k_shot):
     
     print(f"{k_shot}-shot JSON data has been saved to {output_file}")
 
-# Example usage
-filter_k_shot_json('/path/to/file.json]', '1_shot.json', k_shot=1)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Create a k-shot subset from a COCO-style dataset")
+    parser.add_argument("input", help="Path to input JSON file")
+    parser.add_argument("output", help="Path to save the k-shot JSON")
+    parser.add_argument("k", type=int, help="Number of shots per category")
+
+    args = parser.parse_args()
+    filter_k_shot_json(args.input, args.output, args.k)
