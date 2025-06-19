@@ -15,8 +15,14 @@
    ```python
    proto = class_weights.T.unsqueeze(0).unsqueeze(-1)
    adapted = self.cic(proto, patch_tokens)
-   class_weights = adapted.squeeze(0).squeeze(-1).T
+   adapted = adapted.squeeze(0).squeeze(-1).T
+   class_weights = F.normalize(
+       (1 - self.cic_alpha) * class_weights + self.cic_alpha * adapted,
+       dim=-1,
+   )
    ```
+   其中 `cic_alpha` 控制新旧原型的融合比例，默认 0.5。
+   请确保在代码中 `import torch.nn.functional as F`。
    以此得到针对当前图像调整后的原型。
 4. 后续的 ROI 分类与回归均基于新的 `class_weights` 进行。
 

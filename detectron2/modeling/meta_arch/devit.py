@@ -638,6 +638,8 @@ class OpenSetDetectorWithExamples(nn.Module):
         self.cic = ConditionalInformationCouplingModule(
             self.ndim, dimension=2, sub_sample=False, bn_layer=False
         ).to(self.pixel_mean.device)
+        # weighting factor for blending adapted prototypes
+        self.cic_alpha = 0.5
 
         self.roialign_size = roialign_size
         self.roi_align = ROIAlign(roialign_size, 1 / backbone.patch_size, sampling_ratio=-1)
@@ -1135,11 +1137,13 @@ class OpenSetDetectorWithExamples(nn.Module):
 
         # Adapt class prototypes for the current image using CIC during inference
         if not self.training:
-            batch_size = patch_tokens.size(0)
             proto = class_weights.T.unsqueeze(0).unsqueeze(-1)
-            proto = proto.repeat(batch_size, 1, 1, 1)
             adapted = self.cic(proto, patch_tokens)
-            class_weights = adapted[:, :, :, 0].mean(0).T
+            adapted = adapted.squeeze(0).squeeze(-1).T
+            class_weights = F.normalize(
+                (1 - self.cic_alpha) * class_weights + self.cic_alpha * adapted,
+                dim=-1,
+            )
 
         if self.training or self.use_one_shot:
             with torch.no_grad():
