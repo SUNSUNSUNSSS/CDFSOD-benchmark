@@ -47,7 +47,6 @@ from lib.dinov2.layers.block import Block
 from lib.regionprop import augment_rois, region_coord_2_abs_coord, abs_coord_2_region_coord, SpatialIntegral
 from lib.categories import SEEN_CLS_DICT, ALL_CLS_DICT
 from info_nce import InfoNCE
-from lib.cic import ConditionalInformationCouplingModule
 
 
 def generalized_box_iou(boxes1, boxes2) -> torch.Tensor:
@@ -634,11 +633,6 @@ class OpenSetDetectorWithExamples(nn.Module):
             self.register_buffer("bg_tokens", bg_protos)
             self.num_bg_tokens = len(self.bg_tokens)
 
-        # Conditional Information Coupling module for prototype adaptation
-        self.cic = ConditionalInformationCouplingModule(
-            self.ndim, dimension=2, sub_sample=False, bn_layer=False
-        ).to(self.pixel_mean.device)
-
         self.roialign_size = roialign_size
         self.roi_align = ROIAlign(roialign_size, 1 / backbone.patch_size, sampling_ratio=-1)
         # input: NCHW, Bx5, output BCKK
@@ -1132,14 +1126,6 @@ class OpenSetDetectorWithExamples(nn.Module):
                 patch_tokens = all_patch_tokens[self.vit_feat_name]
                 all_patch_tokens.pop(self.vit_feat_name)
                 # patch_tokens = self.backbone(images.tensor)['res11']
-
-        # Adapt class prototypes for the current image using CIC during inference
-        if not self.training:
-            batch_size = patch_tokens.size(0)
-            proto = class_weights.T.unsqueeze(0).unsqueeze(-1)
-            proto = proto.repeat(batch_size, 1, 1, 1)
-            adapted = self.cic(proto, patch_tokens)
-            class_weights = adapted[:, :, :, 0].mean(0).T
 
         if self.training or self.use_one_shot:
             with torch.no_grad():
