@@ -47,6 +47,7 @@ from lib.dinov2.layers.block import Block
 from lib.regionprop import augment_rois, region_coord_2_abs_coord, abs_coord_2_region_coord, SpatialIntegral
 from lib.categories import SEEN_CLS_DICT, ALL_CLS_DICT
 from info_nce import InfoNCE
+from lib.cic import ConditionalInformationCouplingModule
 
 
 def generalized_box_iou(boxes1, boxes2) -> torch.Tensor:
@@ -633,6 +634,16 @@ class OpenSetDetectorWithExamples(nn.Module):
             self.register_buffer("bg_tokens", bg_protos)
             self.num_bg_tokens = len(self.bg_tokens)
 
+        # Conditional Information Coupling module for prototype adaptation
+        self.cic = ConditionalInformationCouplingModule(
+            self.ndim, dimension=2, sub_sample=False, bn_layer=False,
+            mask_mode="gate", init_zero=False
+        ).to(self.pixel_mean.device)
+        # 控制自适应原型与原始原型的融合比例
+        self.cic_alpha = 0.5
+        # 是否在训练阶段也进行CIC
+        self.cic_training = False
+
         self.roialign_size = roialign_size
         self.roi_align = ROIAlign(roialign_size, 1 / backbone.patch_size, sampling_ratio=-1)
         # input: NCHW, Bx5, output BCKK
@@ -1126,6 +1137,25 @@ class OpenSetDetectorWithExamples(nn.Module):
                 patch_tokens = all_patch_tokens[self.vit_feat_name]
                 all_patch_tokens.pop(self.vit_feat_name)
                 # patch_tokens = self.backbone(images.tensor)['res11']
+
+        # 根据当前图像特征自适应调整类别原型
+        if (not self.training) or self.cic_training:
+            # 汇聚多尺度特征以提供更丰富的上下文
+            multi_feats = [patch_tokens]
+            for feat in all_patch_tokens.values():
+                if feat.shape[-2:] != patch_tokens.shape[-2:]:
+                    feat = F.interpolate(feat, patch_tokens.shape[-2:], mode="bilinear", align_corners=False)
+                multi_feats.append(feat)
+            kv_feat = torch.mean(torch.stack(multi_feats, dim=0), dim=0)
+
+            proto = class_weights.T.unsqueeze(0).unsqueeze(-1)
+            proto = proto.expand(kv_feat.size(0), -1, -1, -1)
+            adapted = self.cic(proto, kv_feat)
+            adapted = adapted.mean(dim=0).squeeze(-1).T
+            class_weights = F.normalize(
+                (1 - self.cic_alpha) * class_weights + self.cic_alpha * adapted,
+                dim=-1,
+            )
 
         if self.training or self.use_one_shot:
             with torch.no_grad():

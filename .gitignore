@@ -1,0 +1,6 @@
+build/
+detectron2.egg-info/
+detectron2/_C.cpython-*.so
+detectron2/model_zoo/configs/
+__pycache__/
+detectron2/model_zoo/
